@@ -999,6 +999,11 @@ class SqlaTable(Model, Queryable, AuditMixinNullable, ImportMixin):
         if granularity not in self.dttm_cols:
             granularity = self.main_dttm_col
 
+        # Database spec supports join-free timeslot grouping
+        time_groupby_inline = False
+        if hasattr(self.database.db_engine_spec, 'time_groupby_inline'):
+            time_groupby_inline = self.database.db_engine_spec.time_groupby_inline
+
         cols = {col.column_name: col for col in self.columns}
         metrics_dict = {m.metric_name: m for m in self.metrics}
         qry_start_dttm = datetime.now()
@@ -1037,6 +1042,7 @@ class SqlaTable(Model, Queryable, AuditMixinNullable, ImportMixin):
                 select_exprs.append(outer)
                 inner_groupby_exprs.append(inner)
                 inner_select_exprs.append(inner)
+
         elif columns:
             for s in columns:
                 select_exprs.append(cols[s].sqla_col)
@@ -1070,8 +1076,8 @@ class SqlaTable(Model, Queryable, AuditMixinNullable, ImportMixin):
 
             if is_timeseries:
                 timestamp = dttm_col.get_timestamp_expression(time_grain)
-                select_exprs += [timestamp]
-                groupby_exprs += [timestamp]
+                select_exprs = [timestamp] + select_exprs
+                groupby_exprs = [timestamp] + groupby_exprs
 
             time_filter = dttm_col.get_time_filter(from_dttm, to_dttm)
 
@@ -1123,7 +1129,8 @@ class SqlaTable(Model, Queryable, AuditMixinNullable, ImportMixin):
 
         qry = qry.limit(row_limit)
 
-        if is_timeseries and timeseries_limit and groupby:
+        # Some SQL dialects use timeslot grouping inline with other dimensions
+        if is_timeseries and timeseries_limit and groupby and not time_groupby_inline:
             # some sql dialects require for order by expressions
             # to also be in the select clause
             inner_select_exprs += [main_metric_expr]
