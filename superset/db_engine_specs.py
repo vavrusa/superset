@@ -331,6 +331,7 @@ class VerticaEngineSpec(PostgresEngineSpec):
 class ClickHouseEngineSpec(BaseEngineSpec):
     engine = 'clickhouse'
 
+    time_secondary_columns = True
     time_groupby_inline = True
     time_grains = (
         Grain('Time Column', _('Time Column'), '{col}'),

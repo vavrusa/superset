@@ -1021,7 +1021,7 @@ class SqlaTable(Model, Queryable, AuditMixinNullable, ImportMixin):
         if timeseries_limit_metric:
             timeseries_limit_metric_expr = \
                 timeseries_limit_metric.sqla_col
-        if metrics:
+        if metrics and len(metrics_exprs) > 0:
             main_metric_expr = metrics_exprs[0]
         else:
             main_metric_expr = literal_column("COUNT(*)").label("ccount")
@@ -1073,13 +1073,22 @@ class SqlaTable(Model, Queryable, AuditMixinNullable, ImportMixin):
 
             dttm_col = cols[granularity]
             time_grain = extras.get('time_grain_sqla')
+            time_filters = []
 
             if is_timeseries:
                 timestamp = dttm_col.get_timestamp_expression(time_grain)
                 select_exprs = [timestamp] + select_exprs
                 groupby_exprs = [timestamp] + groupby_exprs
 
-            time_filter = dttm_col.get_time_filter(from_dttm, to_dttm)
+            # Use all dttm columns to support index with secondary dttm columns
+            time_secondary_columns = False
+            if hasattr(self.database.db_engine_spec, 'time_secondary_columns'):
+                time_secondary_columns = self.database.db_engine_spec.time_secondary_columns
+            if time_secondary_columns:
+                for c in self.dttm_cols:
+                    if c != granularity:
+                        time_filters.append(cols[c].get_time_filter(from_dttm, to_dttm))
+            time_filters.append(dttm_col.get_time_filter(from_dttm, to_dttm))
 
         select_exprs += metrics_exprs
         qry = select(select_exprs)
@@ -1116,7 +1125,7 @@ class SqlaTable(Model, Queryable, AuditMixinNullable, ImportMixin):
                 having_clause_and += [wrap_clause_in_parens(
                     template_processor.process_template(having))]
         if granularity:
-            qry = qry.where(and_(*([time_filter] + where_clause_and)))
+            qry = qry.where(and_(*(time_filters + where_clause_and)))
         else:
             qry = qry.where(and_(*where_clause_and))
         qry = qry.having(and_(*having_clause_and))
